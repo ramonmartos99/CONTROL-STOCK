@@ -110,6 +110,9 @@
   }
   .sync-badge.live .dot{background:#4ee08a; box-shadow:0 0 0 0 rgba(78,224,138,.6);}
   .sync-badge.offline .dot{background:#e05a4e; animation:none;}
+  .sync-badge.warn .dot{background:var(--amber); animation:none;}
+  .sync-badge + .sync-badge{margin-top:4px;}
+  .sync-badge.excel-off{color:#ffd9d4; font-weight:700;}
   @keyframes pulse{
     0%{box-shadow:0 0 0 0 rgba(255,255,255,.35);}
     70%{box-shadow:0 0 0 7px rgba(255,255,255,0);}
@@ -444,6 +447,7 @@
     <div class="top-meta" id="metaChips"></div>
   </div>
   <div class="sync-badge" id="syncBadge"><span class="dot"></span><span id="syncText">Conectando…</span></div>
+  <div class="sync-badge" id="excelBadge"><span class="dot"></span><span id="excelText">Excel: comprobando…</span></div>
 </header>
 
 <div class="search-zone">
@@ -639,6 +643,53 @@ async function init(){
   await ensureSeeded();
   listenToCestos();
   listenToHistorial();
+  listenToSyncEstado();
+}
+
+/* ---- Estado del programa del PC que sincroniza con el Excel ---- */
+let syncEstado;   // undefined = cargando, null = nunca ha conectado
+function listenToSyncEstado(){
+  onSnapshot(doc(db,'estado','sync'), (snap)=>{
+    syncEstado = snap.exists() ? snap.data({ serverTimestamps:'estimate' }) : null;
+    renderExcelBadge();
+  }, (err)=>{
+    console.error(err);
+    setExcelBadge('warn', 'Excel: no se puede comprobar el estado');
+  });
+  setInterval(renderExcelBadge, 30000);
+}
+function setExcelBadge(mode, text){
+  const b = document.getElementById('excelBadge');
+  b.classList.remove('live','offline','warn','excel-off');
+  if(mode) b.classList.add(mode);
+  if(mode==='offline') b.classList.add('excel-off');
+  document.getElementById('excelText').textContent = text;
+}
+function fmtCuando(d){
+  const hora = d.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+  const hoy = new Date();
+  if(d.toDateString()===hoy.toDateString()) return `las ${hora}`;
+  const ayer = new Date(hoy); ayer.setDate(hoy.getDate()-1);
+  if(d.toDateString()===ayer.toDateString()) return `ayer a las ${hora}`;
+  return `el ${d.toLocaleDateString('es-ES', { day:'2-digit', month:'2-digit' })} a las ${hora}`;
+}
+function renderExcelBadge(){
+  if(syncEstado===undefined) return;
+  if(syncEstado===null || !syncEstado.ultimoLatido){
+    setExcelBadge('offline', 'Excel: el programa del PC no está conectado');
+    return;
+  }
+  const t = syncEstado.ultimoLatido.toDate ? syncEstado.ultimoLatido.toDate() : new Date(syncEstado.ultimoLatido);
+  const parado = syncEstado.parado || (Date.now() - t.getTime() > 3*60*1000);
+  if(parado){
+    setExcelBadge('offline', `Excel: sincronización PARADA desde ${fmtCuando(t)} · revisa el PC${syncEstado.equipo ? ' '+syncEstado.equipo : ''}`);
+  }else if(syncEstado.excelPendiente){
+    setExcelBadge('warn', 'Excel abierto · los cambios se escribirán al cerrarlo');
+  }else if(syncEstado.error){
+    setExcelBadge('warn', 'Excel: error en la sincronización · mira el registro del PC');
+  }else{
+    setExcelBadge('live', 'Excel sincronizado');
+  }
 }
 
 function renderMeta(){
